@@ -130,17 +130,64 @@ coursepilot-mcp/
 └── README.md
 ```
 
-## MCP Concepts Learned
+## MCP Learning Notes
 
-- Tool schema definition and JSON validation
-- Async tool handlers and server lifecycle
-- Running MCP servers as subprocesses
-- MCP client patterns and tool composition
-- Error handling across multiple servers
-- Stateful vs. stateless tool operations
+The whole point of this project is to understand MCP. Here are the concrete ideas each phase teaches, with pointers to where in the code to look.
+
+### 1. A tool is just a decorated function
+
+In both servers, a tool is a Python function that returns JSON-serializable data:
+
+```python
+@mcp.tool()
+def canvas_get_courses() -> list[dict]:
+    """List the student's active Canvas courses."""
+    return _api().get_courses()
+```
+
+The docstring becomes the tool's description for the LLM. The type hints become the input/output schema. See [`canvas_server/server.py`](canvas_server/server.py).
+
+### 2. A server is a long-running process that speaks over stdio
+
+Each server's `__main__` just calls `mcp.run()`. That blocks and listens for JSON-RPC messages on stdin/stdout. You never implement the protocol yourself.
+
+### 3. Two servers do not share memory
+
+Even though they run on the same machine, they're independent OS processes. The Google Calendar server has no idea what Canvas is. This is a feature, not a bug — it keeps responsibilities clean.
+
+### 4. The client composes servers
+
+[`sync_orchestrator.py`](sync_orchestrator.py) is the "aha" moment. It:
+
+1. Spawns both servers as subprocesses (`stdio_client` + `StdioServerParameters`).
+2. Opens a `ClientSession` against each.
+3. Calls tools via `session.call_tool(name, arguments)`.
+
+Note what it does NOT do: `import canvas_api`, `from google_api import ...`, etc. The orchestrator never touches the server internals. If you swap `canvas_server` for a different implementation that honors the same tool contract, the orchestrator keeps working.
+
+### 5. Tool results are structured content, not raw returns
+
+MCP wraps tool returns in a `content` list of items. For JSON data our tools return, we unwrap it in `_call`:
+
+```python
+for item in result.content:
+    return json.loads(item.text)
+```
+
+See [`sync_orchestrator.py:49`](sync_orchestrator.py#L49).
+
+### 6. Dedup belongs in the client, not the servers
+
+Each server is stateless and single-purpose. Dedup logic (source priority, title normalization) lives in the orchestrator because it depends on business rules that cross both domains. See `deduplicate()` in the orchestrator and `AcademicEvent.dedup_key()` in [`shared/models.py`](shared/models.py).
+
+## Testing
+
+```bash
+pytest tests/
+```
+
+25 tests cover syllabus parsing, deduplication, and the sync pipeline (with mocked MCP sessions — no real API calls needed).
 
 ## Notes
 
-This is a learning project designed to understand MCP. It prioritizes clarity and modularity over production features.
-
-For detailed implementation notes, see the comments in each module.
+This is a learning project. It prioritizes clarity and modularity over production features — no database, no retry logic, no LLM. Those can be added later without changing the server contracts.
