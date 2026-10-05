@@ -18,7 +18,7 @@ import asyncio
 import json
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters
@@ -45,19 +45,38 @@ SOURCE_PRIORITY = {
 # ---------- MCP helpers ----------
 
 async def _call(session: ClientSession, name: str, arguments: dict | None = None) -> Any:
-    """Call a tool and unwrap the JSON payload."""
+    """Call a tool and unwrap the JSON payload.
+
+    MCP serializes a Python `list[...]` return by emitting one TextContent per
+    element, so we must accumulate rather than return the first item. For a
+    tool that returns a single dict or scalar, there is exactly one content
+    item and we unwrap it.
+    """
     result = await session.call_tool(name, arguments=arguments or {})
-    # MCP tool results arrive as a list of content items; our tools return
-    # JSON-serializable structures as text content.
+    parsed: list = []
     for item in result.content:
         text = getattr(item, "text", None)
         if text is None:
             continue
         try:
-            return json.loads(text)
+            parsed.append(json.loads(text))
         except json.JSONDecodeError:
-            return text
-    return None
+            parsed.append(text)
+    if not parsed:
+        return None
+    if len(parsed) == 1:
+        return parsed[0]
+    return parsed
+
+
+async def _call_list(session: ClientSession, name: str, arguments: dict | None = None) -> list:
+    """Like _call but always returns a list, even for 0 or 1 result items."""
+    result = await _call(session, name, arguments)
+    if result is None:
+        return []
+    if isinstance(result, list):
+        return result
+    return [result]
 
 
 def _canvas_params() -> StdioServerParameters:
@@ -74,6 +93,17 @@ def _calendar_params() -> StdioServerParameters:
     )
 
 
+def _short_code(course_code: str) -> str:
+    """Trim a Canvas course code to its short, human-readable prefix.
+
+    Canvas serves codes like 'DS4300.13913.202710'; we only want 'DS4300'
+    on calendar titles. If the first segment is non-trivial (not just dots),
+    return it; otherwise fall back to the original string.
+    """
+    first = course_code.split(".", 1)[0].strip()
+    return first or course_code
+
+
 # ---------- Event collection ----------
 
 async def collect_canvas_events(canvas: ClientSession) -> list[AcademicEvent]:
@@ -82,9 +112,9 @@ async def collect_canvas_events(canvas: ClientSession) -> list[AcademicEvent]:
     If config.TERM_FILTER is set, only courses whose course_code contains one
     of the configured substrings are included.
     """
-    courses = await _call(canvas, "canvas_get_courses")
-    if not courses or (isinstance(courses, list) and courses and "error" in courses[0]):
-        logger.error("Could not fetch courses: %s", courses)
+    courses = await _call_list(canvas, "canvas_get_courses")
+    if courses and "error" in courses[0]:
+        logger.error("Could not fetch courses: %s", courses[0])
         return []
 
     if config.TERM_FILTER:
@@ -97,24 +127,26 @@ async def collect_canvas_events(canvas: ClientSession) -> list[AcademicEvent]:
 
     all_events: list[AcademicEvent] = []
     for course in courses:
-        code = course["course_code"]
+        raw_code = course["course_code"]
+        code = _short_code(raw_code)
         cid = course["course_id"]
         logger.info("Fetching course %s (%s)", code, cid)
 
-        assignments = await _call(
+        assignments = await _call_list(
             canvas, "canvas_get_assignments", {"course_id": cid, "course_code": code}
         )
         syllabus = await _call(
             canvas, "canvas_get_syllabus", {"course_id": cid, "course_code": code}
         )
 
-        for raw in assignments or []:
+        for raw in assignments:
             if "error" in raw:
                 logger.warning("Assignment error for %s: %s", code, raw["error"])
                 continue
             all_events.append(AcademicEvent(**raw))
 
-        for raw in (syllabus or {}).get("events", []):
+        syllabus_events = (syllabus or {}).get("events", []) if isinstance(syllabus, dict) else []
+        for raw in syllabus_events:
             all_events.append(AcademicEvent(**raw))
 
     logger.info("Collected %d raw events across %d courses", len(all_events), len(courses))
@@ -213,12 +245,12 @@ async def _find_match(
     """Look for a calendar event with the same title near the same day."""
     time_min = (when - timedelta(days=1)).isoformat()
     time_max = (when + timedelta(days=1)).isoformat()
-    matches = await _call(
+    matches = await _call_list(
         calendar,
         "calendar_find_event",
         {"query": title, "time_min": time_min, "time_max": time_max},
     )
-    if not matches or (isinstance(matches, list) and matches and "error" in matches[0]):
+    if matches and "error" in matches[0]:
         return None
     for m in matches:
         if m.get("title", "").strip() == title.strip():
@@ -227,7 +259,12 @@ async def _find_match(
 
 
 def _needs_update(existing: dict, when: datetime) -> bool:
-    """Compare existing event start to the target datetime at minute resolution."""
+    """Compare existing event start to the target datetime at minute resolution.
+
+    Google returns start times in the event's display timezone (e.g. the
+    America/New_York offset), while Canvas gives us UTC. Normalize both to
+    UTC before comparing so we do not re-update unchanged events on every run.
+    """
     existing_start = existing.get("start")
     if not existing_start:
         return True
@@ -235,10 +272,55 @@ def _needs_update(existing: dict, when: datetime) -> bool:
         existing_dt = datetime.fromisoformat(existing_start.replace("Z", "+00:00"))
     except ValueError:
         return True
-    # Normalize: drop tzinfo for comparison since Canvas times are naive.
-    e = existing_dt.replace(tzinfo=None)
-    t = when.replace(tzinfo=None)
-    return abs((e - t).total_seconds()) > 60
+    if existing_dt.tzinfo is None:
+        existing_dt = existing_dt.replace(tzinfo=timezone.utc)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return abs((existing_dt - when).total_seconds()) > 60
+
+
+# ---------- Cleanup ----------
+
+CLEANUP_MARKER = "Source: canvas_"
+
+
+async def cleanup_synced_events(days_back: int = 180, days_ahead: int = 365) -> dict:
+    """Delete every calendar event this app previously created.
+
+    Identified by the marker string this orchestrator writes into every
+    event's description ('Source: canvas_...'). Searches a wide window
+    (default: 180 days back, 365 days ahead) so past-dated events are
+    caught too. Safe to run even when nothing was created yet.
+    """
+    now = datetime.utcnow()
+    time_min = (now - timedelta(days=days_back)).isoformat()
+    time_max = (now + timedelta(days=days_ahead)).isoformat()
+
+    deleted = failed = scanned = 0
+    async with stdio_client(_calendar_params()) as (g_read, g_write):
+        async with ClientSession(g_read, g_write) as calendar:
+            await calendar.initialize()
+            events = await _call_list(
+                calendar,
+                "calendar_find_event",
+                {"query": "", "time_min": time_min, "time_max": time_max},
+            )
+            for e in events:
+                scanned += 1
+                if "error" in e:
+                    continue
+                if CLEANUP_MARKER not in (e.get("description") or ""):
+                    continue
+                result = await _call(
+                    calendar, "calendar_delete_event", {"event_id": e["event_id"]}
+                )
+                if isinstance(result, dict) and result.get("deleted"):
+                    logger.info("Deleted: %s", e.get("title"))
+                    deleted += 1
+                else:
+                    logger.error("Delete failed for %s: %s", e.get("title"), result)
+                    failed += 1
+    return {"scanned": scanned, "deleted": deleted, "failed": failed}
 
 
 # ---------- Entrypoint ----------
@@ -271,6 +353,10 @@ def main() -> None:
     if missing:
         logger.error("Cannot run sync: missing config %s", missing)
         sys.exit(1)
+    if "--cleanup" in sys.argv:
+        summary = asyncio.run(cleanup_synced_events())
+        logger.info("Cleanup complete: %s", summary)
+        return
     summary = asyncio.run(sync_semester())
     logger.info("Sync complete: %s", summary)
 

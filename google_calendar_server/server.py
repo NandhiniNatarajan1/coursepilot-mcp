@@ -127,6 +127,16 @@ def calendar_find_event(
 
 
 @mcp.tool()
+def calendar_delete_event(event_id: str) -> dict:
+    """Delete a Google Calendar event by id."""
+    try:
+        return _api().delete_event(event_id)
+    except GoogleCalendarError as e:
+        logger.exception("delete_event failed")
+        return {"error": str(e)}
+
+
+@mcp.tool()
 def calendar_list_upcoming(days_ahead: int = 90) -> list[dict]:
     """List events in the next N days. Useful for sync comparison."""
     try:

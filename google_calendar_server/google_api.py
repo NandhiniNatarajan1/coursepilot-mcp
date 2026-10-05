@@ -12,7 +12,7 @@ Prerequisites:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,18 @@ logger = logging.getLogger(__name__)
 
 class GoogleCalendarError(Exception):
     pass
+
+
+def _rfc3339_utc(dt: datetime) -> str:
+    """Format a datetime as an RFC3339 UTC timestamp ending in 'Z'.
+
+    Google Calendar's `timeMin`/`timeMax` reject strings that carry both a
+    numeric UTC offset and a trailing 'Z'. isoformat() on an aware datetime
+    returns the former, so we normalize to the Z form.
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class GoogleCalendarAPI:
@@ -147,9 +159,9 @@ class GoogleCalendarAPI:
             "orderBy": "startTime",
         }
         if time_min is not None:
-            params["timeMin"] = time_min.isoformat() + "Z"
+            params["timeMin"] = _rfc3339_utc(time_min)
         if time_max is not None:
-            params["timeMax"] = time_max.isoformat() + "Z"
+            params["timeMax"] = _rfc3339_utc(time_max)
         try:
             resp = self.service.events().list(**params).execute()
             items = resp.get("items", [])
@@ -166,6 +178,16 @@ class GoogleCalendarAPI:
             ]
         except HttpError as e:
             raise GoogleCalendarError(f"find_event failed: {e}") from e
+
+    def delete_event(self, event_id: str) -> dict:
+        """Delete an event by id. Returns {deleted: True} on success."""
+        try:
+            self.service.events().delete(
+                calendarId=self.calendar_id, eventId=event_id
+            ).execute()
+            return {"deleted": True, "event_id": event_id}
+        except HttpError as e:
+            raise GoogleCalendarError(f"delete_event failed: {e}") from e
 
     def list_upcoming(self, days_ahead: int = 90) -> list[dict]:
         """List events within the next N days (useful for sync comparisons)."""
