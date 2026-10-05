@@ -39,22 +39,24 @@ Google Calendar
 
 ### Prerequisites
 - Python 3.12+
-- Canvas API token
-- Google OAuth credentials
+- A Canvas account with API token access
+- A Google account with Calendar access
 
 ### Installation
 
 1. Clone the repo:
    ```bash
-   git clone https://github.com/yourusername/coursepilot-mcp.git
+   git clone https://github.com/NandhiniNatarajan1/coursepilot-mcp.git
    cd coursepilot-mcp
    ```
 
 2. Create virtual environment:
    ```bash
    python -m venv venv
-   source venv/Scripts/activate  # Windows
-   # source venv/bin/activate    # macOS/Linux
+   # Windows PowerShell:
+   .\venv\Scripts\Activate.ps1
+   # macOS/Linux:
+   source venv/bin/activate
    ```
 
 3. Install dependencies:
@@ -62,28 +64,44 @@ Google Calendar
    pip install -r requirements.txt
    ```
 
-4. Configure credentials:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your Canvas API token and Google credentials path
-   ```
+### Credentials
+
+**Canvas:**
+1. Log into Canvas → Account → Settings → New Access Token.
+2. Copy the token.
+
+**Google Calendar (one-time OAuth setup):**
+1. Go to [Google Cloud Console](https://console.cloud.google.com/) and create a project.
+2. Enable the **Google Calendar API** for that project.
+3. Create OAuth 2.0 credentials of type **Desktop app**.
+4. Download the `credentials.json` and place it in the project root.
+5. First run of the sync will open a browser for consent and write `token.json` next to it.
+
+**Env file:**
+```bash
+cp .env.example .env
+# Edit .env:
+#   CANVAS_API_TOKEN=...
+#   CANVAS_BASE_URL=https://<your-school>.instructure.com
+```
 
 ## Running the Project
 
-### Canvas Server
-```bash
-python canvas_server/server.py
-```
-
-### Google Calendar Server
-```bash
-python google_calendar_server/server.py
-```
-
-### Full Sync
+### Full sync (production use)
 ```bash
 python sync_orchestrator.py
 ```
+This spawns both MCP servers as subprocesses, collects events, dedupes, and syncs to Google Calendar.
+
+### Running a server manually (for MCP inspection)
+```bash
+# Canvas server:
+python -m canvas_server.server
+
+# Calendar server:
+python -m google_calendar_server.server
+```
+Both speak the MCP protocol over stdio and are usable from any MCP client (including Claude Desktop with the appropriate config).
 
 ## Testing
 
