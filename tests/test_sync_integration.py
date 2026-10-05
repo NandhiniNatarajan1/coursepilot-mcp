@@ -46,7 +46,10 @@ def _mock_canvas_session(courses, assignments_by_course, syllabus_by_course):
 
 
 @pytest.mark.asyncio
-async def test_collect_canvas_events_pulls_assignments_and_syllabus():
+async def test_collect_canvas_events_pulls_assignments_and_syllabus(monkeypatch):
+    # Isolate from a user's local .env that may set TERM_FILTER.
+    monkeypatch.setattr("sync_orchestrator.config.TERM_FILTER", [])
+
     courses = [
         {"course_id": 1, "course_name": "Database Design", "course_code": "CS 3200"},
     ]

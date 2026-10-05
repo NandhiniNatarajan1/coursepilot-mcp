@@ -18,6 +18,11 @@ GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
+# Comma-separated substrings. If set, only courses whose course_code contains
+# one of these substrings are synced. Example: "202710" for Fall 2026 at
+# Northeastern. Leave empty to sync every active course Canvas returns.
+TERM_FILTER = [s.strip() for s in os.getenv("TERM_FILTER", "").split(",") if s.strip()]
+
 
 def validate() -> list[str]:
     """Return a list of missing config values. Empty list = all good."""

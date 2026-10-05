@@ -25,7 +25,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 import config
-from shared.models import AcademicEvent, EventSource, EventType
+from shared.models import AcademicEvent, EventSource
 
 logging.basicConfig(
     level=config.LOG_LEVEL,
@@ -77,11 +77,23 @@ def _calendar_params() -> StdioServerParameters:
 # ---------- Event collection ----------
 
 async def collect_canvas_events(canvas: ClientSession) -> list[AcademicEvent]:
-    """Gather assignments + syllabus events from every active course."""
+    """Gather assignments + syllabus events from every active course.
+
+    If config.TERM_FILTER is set, only courses whose course_code contains one
+    of the configured substrings are included.
+    """
     courses = await _call(canvas, "canvas_get_courses")
     if not courses or (isinstance(courses, list) and courses and "error" in courses[0]):
         logger.error("Could not fetch courses: %s", courses)
         return []
+
+    if config.TERM_FILTER:
+        courses = [
+            c for c in courses
+            if any(term in c.get("course_code", "") for term in config.TERM_FILTER)
+        ]
+        logger.info("Filtered to %d courses matching TERM_FILTER=%s",
+                    len(courses), config.TERM_FILTER)
 
     all_events: list[AcademicEvent] = []
     for course in courses:
