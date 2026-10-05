@@ -3,9 +3,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 PROJECT_ROOT = Path(__file__).parent
+load_dotenv(PROJECT_ROOT / ".env")
 
 CANVAS_API_TOKEN = os.getenv("CANVAS_API_TOKEN", "")
 CANVAS_BASE_URL = os.getenv("CANVAS_BASE_URL", "").rstrip("/")

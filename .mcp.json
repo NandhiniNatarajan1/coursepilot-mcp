@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "canvas": {
+      "command": "C:\\Users\\nandh\\coursepilot-mcp\\venv\\Scripts\\python.exe",
+      "args": ["-m", "canvas_server.server"],
+      "env": {
+        "PYTHONPATH": "C:\\Users\\nandh\\coursepilot-mcp"
+      }
+    },
+    "google-calendar": {
+      "command": "C:\\Users\\nandh\\coursepilot-mcp\\venv\\Scripts\\python.exe",
+      "args": ["-m", "google_calendar_server.server"],
+      "env": {
+        "PYTHONPATH": "C:\\Users\\nandh\\coursepilot-mcp"
+      }
+    }
+  }
+}

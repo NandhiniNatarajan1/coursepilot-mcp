@@ -103,6 +103,54 @@ python -m google_calendar_server.server
 ```
 Both speak the MCP protocol over stdio and are usable from any MCP client (including Claude Desktop with the appropriate config).
 
+## Deploying the servers
+
+### Use with Claude Code (VSCode)
+
+A `.mcp.json` is checked in at the project root. Reopen this project folder in Claude Code and approve the servers when prompted. Then you can ask Claude natural-language questions directly:
+
+- "What assignments are due this week?"
+- "When is my DS4300 midterm?"
+- "Create a calendar event for my MATH1241 study session on Oct 20 at 7pm."
+- "Delete the INTB1203 Exam 1 event from my calendar."
+
+The orchestration script isn't needed when you drive it this way — Claude calls the tools directly.
+
+### Use with Claude Desktop
+
+If you install Claude Desktop from https://claude.ai/download, add this to `%APPDATA%\Claude\claude_desktop_config.json` (create the file if missing):
+
+```json
+{
+  "mcpServers": {
+    "canvas": {
+      "command": "C:\\Users\\nandh\\coursepilot-mcp\\venv\\Scripts\\python.exe",
+      "args": ["-m", "canvas_server.server"],
+      "env": {
+        "PYTHONPATH": "C:\\Users\\nandh\\coursepilot-mcp"
+      }
+    },
+    "google-calendar": {
+      "command": "C:\\Users\\nandh\\coursepilot-mcp\\venv\\Scripts\\python.exe",
+      "args": ["-m", "google_calendar_server.server"],
+      "env": {
+        "PYTHONPATH": "C:\\Users\\nandh\\coursepilot-mcp"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop; the servers appear in the connected tools menu.
+
+### Scheduled sync (Windows Task Scheduler)
+
+To keep the calendar automatically in sync without talking to Claude, create a daily task that runs:
+
+```
+C:\Users\nandh\coursepilot-mcp\venv\Scripts\python.exe C:\Users\nandh\coursepilot-mcp\sync_orchestrator.py
+```
+
 ## Testing
 
 ```bash
