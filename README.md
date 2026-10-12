@@ -1,10 +1,10 @@
 # CoursePilot MCP
 
-A full-stack learning project that connects Canvas LMS to Google Calendar using the Model Context Protocol (MCP).
+A tool that keeps your Google Calendar in sync with Canvas LMS. It's built as two Model Context Protocol (MCP) servers and an orchestrating MCP client, so it works as a scheduled sync and also as tools Claude can call directly.
 
-## Project Goal
+## What It Does
 
-Understand MCP servers by building a real-world application that:
+CoursePilot:
 1. Retrieves courses and assignments from Canvas
 2. Extracts academic dates from course syllabi
 3. Syncs all events to Google Calendar
@@ -27,12 +27,12 @@ Google Calendar MCP Server (tools: create_event, update_event, find_event)
 Google Calendar
 ```
 
-## MCP Learning Path
+## Build Phases
 
 - **Phase 1**: Data models (no MCP)
 - **Phase 2**: Canvas MCP server (first server, tool definitions)
 - **Phase 3**: Google Calendar MCP server (second server, patterns)
-- **Phase 4**: Orchestration script (MCP client, composition) ← "aha" moment
+- **Phase 4**: Orchestration script (MCP client, composition)
 - **Phase 5**: Tests & documentation
 
 ## Setup
@@ -118,23 +118,23 @@ The orchestration script isn't needed when you drive it this way — Claude call
 
 ### Use with Claude Desktop
 
-If you install Claude Desktop from https://claude.ai/download, add this to `%APPDATA%\Claude\claude_desktop_config.json` (create the file if missing):
+If you install Claude Desktop from https://claude.ai/download, add this to `%APPDATA%\Claude\claude_desktop_config.json` (create the file if missing), replacing `C:\path\to\coursepilot-mcp` with the folder where you cloned the repo:
 
 ```json
 {
   "mcpServers": {
     "canvas": {
-      "command": "C:\\Users\\nandh\\coursepilot-mcp\\venv\\Scripts\\python.exe",
+      "command": "C:\\path\\to\\coursepilot-mcp\\venv\\Scripts\\python.exe",
       "args": ["-m", "canvas_server.server"],
       "env": {
-        "PYTHONPATH": "C:\\Users\\nandh\\coursepilot-mcp"
+        "PYTHONPATH": "C:\\path\\to\\coursepilot-mcp"
       }
     },
     "google-calendar": {
-      "command": "C:\\Users\\nandh\\coursepilot-mcp\\venv\\Scripts\\python.exe",
+      "command": "C:\\path\\to\\coursepilot-mcp\\venv\\Scripts\\python.exe",
       "args": ["-m", "google_calendar_server.server"],
       "env": {
-        "PYTHONPATH": "C:\\Users\\nandh\\coursepilot-mcp"
+        "PYTHONPATH": "C:\\path\\to\\coursepilot-mcp"
       }
     }
   }
@@ -148,7 +148,7 @@ Restart Claude Desktop; the servers appear in the connected tools menu.
 To keep the calendar automatically in sync without talking to Claude, create a daily task that runs:
 
 ```
-C:\Users\nandh\coursepilot-mcp\venv\Scripts\python.exe C:\Users\nandh\coursepilot-mcp\sync_orchestrator.py
+C:\path\to\coursepilot-mcp\venv\Scripts\python.exe C:\path\to\coursepilot-mcp\sync_orchestrator.py
 ```
 
 ## Testing
@@ -178,9 +178,9 @@ coursepilot-mcp/
 └── README.md
 ```
 
-## MCP Learning Notes
+## Design Notes
 
-The whole point of this project is to understand MCP. Here are the concrete ideas each phase teaches, with pointers to where in the code to look.
+Key design decisions, with pointers to where in the code to look.
 
 ### 1. A tool is just a decorated function
 
@@ -205,7 +205,7 @@ Even though they run on the same machine, they're independent OS processes. The 
 
 ### 4. The client composes servers
 
-[`sync_orchestrator.py`](sync_orchestrator.py) is the "aha" moment. It:
+[`sync_orchestrator.py`](sync_orchestrator.py) is where the servers come together. It:
 
 1. Spawns both servers as subprocesses (`stdio_client` + `StdioServerParameters`).
 2. Opens a `ClientSession` against each.
@@ -238,4 +238,4 @@ pytest tests/
 
 ## Notes
 
-This is a learning project. It prioritizes clarity and modularity over production features — no database, no retry logic, no LLM. Those can be added later without changing the server contracts.
+CoursePilot is built for clarity and modularity: each server is stateless and single-purpose. Persistence and retry logic are on the roadmap and can be added without changing the server contracts.
